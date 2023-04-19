@@ -1,26 +1,18 @@
-import * as cache from '@actions/cache'
-import * as core from '@actions/core'
-import * as exec from '@actions/exec'
+/* eslint-disable no-console */
+
 import * as github from '@actions/github'
-import * as io from '@actions/io'
 import * as path from 'path'
 import * as toolcache from '@actions/tool-cache'
 
-import {
-  getAccessToken,
-  getCacheDir,
-  getCacheKeys,
-  getEnvVar,
-  getInstallDir,
-  printConfig,
-  printStats,
-  zeroStats
-} from './lib'
+import { getInstallDir, printConfig, printStats, zeroStats } from './lib'
+import { mkdirp } from 'fs-extra'
+import nullthrows from 'nullthrows'
+import spawnAsync from '@expo/spawn-async'
 
 // Downloads the latest buildcache release for this OS
 // accessToken is a valid github token to access APIs
 // returns path to the downloaded file
-export async function downloadLatest(accessToken: string): Promise<string> {
+export async function downloadLatest(): Promise<string> {
   // Determine correct file name
   let filename = 'buildcache-macos.zip' // our default
   switch (process.platform) {
@@ -31,13 +23,13 @@ export async function downloadLatest(accessToken: string): Promise<string> {
       filename = 'buildcache-linux.tar.gz'
       break
   }
-  core.info(`buildcache: release file based on runner os is ${filename}`)
+  console.log(`buildcache: release file based on runner os is ${filename}`)
 
   // Grab the releases page for the for the buildcache project
-  const octokit = github.getOctokit(accessToken)
+  const octokit = github.getOctokit(nullthrows(process.env.GITHUB_TOKEN))
 
   // Should we get the latest, or has the user provided a tag?
-  const buildcacheTag = core.getInput('buildcache_tag')
+  const buildcacheTag = process.env.BUILDCACHE_TAG
   let releaseInfo
   if (!buildcacheTag || buildcacheTag.toLowerCase() === 'latest') {
     releaseInfo = await octokit.rest.repos.getLatestRelease({
@@ -63,17 +55,18 @@ export async function downloadLatest(accessToken: string): Promise<string> {
   if (!buildCacheReleaseUrl) {
     throw new Error('Unable to determine release URL for buildcache')
   }
-  core.info(`buildcache: installing from ${buildCacheReleaseUrl}`)
+  console.log(`buildcache: installing from ${buildCacheReleaseUrl}`)
   const buildcacheReleasePath = await toolcache.downloadTool(
     buildCacheReleaseUrl
   )
-  core.info(`buildcache: download path ${buildcacheReleasePath}`)
+  console.log(`buildcache: download path ${buildcacheReleasePath}`)
   return buildcacheReleasePath
 }
 
 export async function install(sourcePath: string): Promise<void> {
+  console.log('installing buildcache...')
   const destPath = await getInstallDir()
-  await io.mkdirP(destPath)
+  await mkdirp(destPath)
 
   let buildcacheFolder
   switch (process.platform) {
@@ -86,7 +79,6 @@ export async function install(sourcePath: string): Promise<void> {
       buildcacheFolder = await toolcache.extractZip(sourcePath, destPath)
       break
   }
-  core.info(`buildcache: unpacked folder ${buildcacheFolder}`)
 
   const buildcacheBinFolder = path.resolve(
     buildcacheFolder,
@@ -94,76 +86,37 @@ export async function install(sourcePath: string): Promise<void> {
     'bin'
   )
   const buildcacheBinPath = path.join(buildcacheBinFolder, 'buildcache')
-  // windows has different filename and cannot do symbolic links
   if (process.platform !== 'win32') {
-    await exec.exec('ln', [
+    await spawnAsync('ln', [
       '-s',
       buildcacheBinPath,
       path.join(buildcacheBinFolder, 'clang')
     ])
-    await exec.exec('ln', [
+    await spawnAsync('ln', [
       '-s',
       buildcacheBinPath,
       path.join(buildcacheBinFolder, 'clang++')
     ])
   }
-  core.addPath(buildcacheBinFolder)
-}
-
-async function configure(): Promise<void> {
-  // Set up the environment by putting our path in there
-  const cacheDir = await getCacheDir()
-  core.exportVariable('BUILDCACHE_DIR', cacheDir)
-  core.exportVariable(
-    'BUILDCACHE_MAX_CACHE_SIZE',
-    getEnvVar('BUILDCACHE_MAX_CACHE_SIZE', '500000000')
-  )
-  core.exportVariable('BUILDCACHE_DEBUG', getEnvVar('BUILDCACHE_DEBUG', '2'))
-  core.exportVariable(
-    'BUILDCACHE_LOG_FILE',
-    path.resolve(cacheDir, getEnvVar('BUILDCACHE_LOG_FILE', 'buildcache.log'))
-  )
-}
-
-async function restore(): Promise<void> {
-  const paths = [await getCacheDir()]
-
-  // withInput restores immutable cache from previous runs, unique creates fresh upload post-run
-  const { withInput, unique } = getCacheKeys()
-  const restoreKeys = [withInput]
-
-  try {
-    const restoredWith = await cache.restoreCache(paths, unique, restoreKeys)
-    if (restoredWith) {
-      core.info(`buildcache: restored from cache key "${restoredWith}".`)
-    } else {
-      core.info(
-        `buildcache: no cache for key ${unique} or ${withInput} - cold cache or invalid key`
-      )
-    }
-  } catch (e) {
-    core.warning(`buildcache: caching not working: ${e}`)
-  }
+  console.log(`buildcache: installed to ${buildcacheBinPath}`)
 }
 
 async function run(): Promise<void> {
   try {
-    const downloadPath = await downloadLatest(getAccessToken())
+    const downloadPath = await downloadLatest()
     await install(downloadPath)
-    await configure()
-    await restore()
     await printConfig()
     await printStats()
-    const zeroStatsFlag = core.getInput('zero_buildcache_stats')
+    const zeroStatsFlag = process.env.BUILDCACHE_ZERO_STATS
     if (zeroStatsFlag && zeroStatsFlag === 'true') {
-      core.info(
+      console.log(
         'buildcache: zeroing stats - stats display in cleanup task will be for this run only.'
       )
       await zeroStats()
     }
   } catch (e) {
-    core.error(`buildcache: failure during restore: ${e}`)
-    core.setFailed(e as Error)
+    console.error(`buildcache: failure during restore: ${e}`)
+    throw e
   }
 }
 
