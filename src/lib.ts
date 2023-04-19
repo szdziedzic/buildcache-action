@@ -16,7 +16,11 @@ async function execBuildCacheWithoutImpersonation(
   if (env.BUILDCACHE_IMPERSONATE) {
     delete env.BUILDCACHE_IMPERSONATE
   }
-  await spawnAsync('buildcache', [arg], { ...options, env })
+  await spawnAsync(
+    '/Users/expo/workingdir/build/managed/buildcache/buildcache/bin/buildcache',
+    [arg],
+    { ...options, env }
+  )
 }
 
 export async function printConfig(): Promise<void> {

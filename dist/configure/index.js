@@ -22066,7 +22066,7 @@ function execBuildCacheWithoutImpersonation(arg, options) {
         if (env.BUILDCACHE_IMPERSONATE) {
             delete env.BUILDCACHE_IMPERSONATE;
         }
-        yield (0, spawn_async_1.default)('buildcache', [arg], Object.assign(Object.assign({}, options), { env }));
+        yield (0, spawn_async_1.default)('/Users/expo/workingdir/build/managed/buildcache/buildcache/bin/buildcache', [arg], Object.assign(Object.assign({}, options), { env }));
     });
 }
 function printConfig() {
